@@ -194,7 +194,7 @@ fn run(allocator: *Allocator, opts: Options) !void {
         std.log.debug("another {s} user is already logged in", .{ name });
 
         if (!opts.force and opts.command != .logout_current) {
-            std.log.err("Error: Another {s} user is currently already logged in.", .{ name });
+            std.log.err("Another {s} user is currently already logged in.", .{ name });
             std.log.err("Rerun this command with -f to forcibly log them out.", .{});
             return;
         }
