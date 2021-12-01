@@ -1,0 +1,3 @@
+[submodule "deps/hzzp"]
+	path = deps/hzzp
+	url = ssh://git@github.com/truemedian/hzzp
