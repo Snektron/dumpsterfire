@@ -45,7 +45,7 @@ const Options = struct {
     username: []const u8,
     password: []const u8,
 
-    fn parse(allocator: *Allocator) !Options {
+    fn parse(allocator: Allocator) !Options {
         var args = try std.process.argsAlloc(allocator);
         errdefer std.process.argsFree(allocator, args);
 
@@ -104,7 +104,7 @@ const Options = struct {
         return error.InvalidArgs;
     }
 
-    fn getEnvVar(allocator: *Allocator, key: []const u8, maybe_default: ?[]const u8) !?[]const u8 {
+    fn getEnvVar(allocator: Allocator, key: []const u8, maybe_default: ?[]const u8) !?[]const u8 {
         return std.process.getEnvVarOwned(allocator, key) catch |err| switch (err) {
             error.EnvironmentVariableNotFound => if (maybe_default) |default|
                 try allocator.dupe(u8, default)
@@ -145,7 +145,7 @@ const Options = struct {
         );
     }
 
-    fn deinit(self: Options, allocator: *Allocator) void {
+    fn deinit(self: Options, allocator: Allocator) void {
         std.process.argsFree(allocator, self.args);
         if (self.command != .help) {
             allocator.free(self.modem_address);
@@ -158,7 +158,7 @@ const Options = struct {
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
 
     var opts = Options.parse(allocator) catch |err| switch (err) {
         error.InvalidArgs, error.ExecutableNameMissing => return 1,
@@ -175,7 +175,7 @@ pub fn main() !u8 {
     return 0;
 }
 
-fn run(allocator: *Allocator, opts: Options) !void {
+fn run(allocator: Allocator, opts: Options) !void {
     var session = try Session.init(allocator, opts.modem_address);
     defer session.close();
 
@@ -217,7 +217,7 @@ fn run(allocator: *Allocator, opts: Options) !void {
     return maybe_err;
 }
 
-fn runCommand(allocator: *Allocator, opts: Options, session: *Session) !void {
+fn runCommand(allocator: Allocator, opts: Options, session: *Session) !void {
     const stdout = std.io.getStdOut().writer();
 
     switch (opts.command) {

@@ -47,7 +47,7 @@ const Attrs = struct {
     DefPasswdChanged: []const u8,
 };
 
-allocator: *Allocator,
+allocator: Allocator,
 
 host: []const u8,
 stream: Stream,
@@ -64,7 +64,7 @@ credential: ?[]const u8,
 // Contents only valid if credential is not null.
 attrs: Attrs,
 
-pub fn init(allocator: *Allocator, host: []const u8) !*Session {
+pub fn init(allocator: Allocator, host: []const u8) !*Session {
     log.debug("connecting to modem at {s}:{}", .{host, port});
 
     const stream = try std.net.tcpConnectToHost(allocator, host, port);
@@ -181,7 +181,7 @@ fn checkHasCredential(self: Session) !void {
 pub fn refreshNonce(self: *Session) void {
     var prng = std.rand.DefaultPrng.init(@bitCast(u64, std.time.milliTimestamp()));
     // Modem nonce consists of 5 digits in the original implementation.
-    self.nonce = prng.random.intRangeLessThan(u32, 10_000, 100_000);
+    self.nonce = prng.random().intRangeLessThan(u32, 10_000, 100_000);
     log.debug("nonce: {}", .{ self.nonce });
 }
 
@@ -266,12 +266,12 @@ pub const QueryResult = struct {
     arena: ArenaAllocator.State,
     results: [][]u8,
 
-    pub fn deinit(self: QueryResult, allocator: *Allocator) void {
+    pub fn deinit(self: QueryResult, allocator: Allocator) void {
         self.arena.promote(allocator).deinit();
     }
 };
 
-pub fn queryOids(self: *Session, ra: *Allocator, items: []const oid.Scalar) !QueryResult {
+pub fn queryOids(self: *Session, ra: Allocator, items: []const oid.Scalar) !QueryResult {
     assert(items.len >= 1);
     try self.checkHasCredential();
     const response = try self.get("/snmpGet", .{
@@ -293,7 +293,7 @@ pub fn queryOids(self: *Session, ra: *Allocator, items: []const oid.Scalar) !Que
     var arena = ArenaAllocator.init(ra);
     errdefer arena.deinit();
 
-    const results = try arena.allocator.alloc([]u8, items.len);
+    const results = try arena.allocator().alloc([]u8, items.len);
 
     // We don't really need a full JSON parser here. The result will look like `{<oid>:<value>[, <oid>:<value>]?}`.
     var tokens = std.json.TokenStream.init(response.data);
@@ -309,7 +309,7 @@ pub fn queryOids(self: *Session, ra: *Allocator, items: []const oid.Scalar) !Que
         const text = tok.?.String.slice(response.data, tokens.i - 1);
         const decoded_length = tok.?.String.decodedLength();
 
-        results[i] = try arena.allocator.alloc(u8, decoded_length);
+        results[i] = try arena.allocator().alloc(u8, decoded_length);
         try std.json.unescapeValidString(results[i], text);
     }
     try expectJsonToken(.ObjectEnd, try tokens.next());
@@ -329,12 +329,12 @@ pub const WalkResult = struct {
     arena: ArenaAllocator.State,
     results: []Entry,
 
-    pub fn deinit(self: WalkResult, allocator: *Allocator) void {
+    pub fn deinit(self: WalkResult, allocator: Allocator) void {
         self.arena.promote(allocator).deinit();
     }
 };
 
-pub fn walk(self: *Session, ra: *Allocator, vectors: []const oid.Vector) !WalkResult {
+pub fn walk(self: *Session, ra: Allocator, vectors: []const oid.Vector) !WalkResult {
     assert(vectors.len >= 1);
     try self.checkHasCredential();
     const response = try self.get("/walk", .{
@@ -351,7 +351,7 @@ pub fn walk(self: *Session, ra: *Allocator, vectors: []const oid.Vector) !WalkRe
     var arena = ArenaAllocator.init(ra);
     errdefer arena.deinit();
 
-    const results = try arena.allocator.alloc(WalkResult.Entry, vectors.len);
+    const results = try arena.allocator().alloc(WalkResult.Entry, vectors.len);
     var current_list = std.MultiArrayList(struct{ key: []u8, value: []u8 }){};
 
     // We don't really need a full JSON parser here. The result will look like `{<oid>:<value>[, <oid>:<value>]?}`.
@@ -390,13 +390,13 @@ pub fn walk(self: *Session, ra: *Allocator, vectors: []const oid.Vector) !WalkRe
             }
         }
 
-        const key = try arena.allocator.alloc(u8, key_dlen - vectors[i].oid.len);
-        const val = try arena.allocator.alloc(u8, val_dlen);
+        const key = try arena.allocator().alloc(u8, key_dlen - vectors[i].oid.len);
+        const val = try arena.allocator().alloc(u8, val_dlen);
 
         try std.json.unescapeValidString(key, key_text[vectors[i].oid.len..]);
         try std.json.unescapeValidString(val, val_text);
 
-        try current_list.append(&arena.allocator, .{.key = key, .value = val});
+        try current_list.append(arena.allocator(), .{.key = key, .value = val});
     }
 
     return WalkResult{
@@ -419,7 +419,7 @@ const Status = struct {
     uptime: oid.Duration,
     cable_mac: oid.MacAddress,
 
-    pub fn deinit(self: Status, ra: *Allocator) void {
+    pub fn deinit(self: Status, ra: Allocator) void {
         self.arena.promote(ra).deinit();
     }
 
@@ -437,7 +437,7 @@ const Status = struct {
     }
 };
 
-pub fn modemStatus(self: *Session, ra: *Allocator) !Status {
+pub fn modemStatus(self: *Session, ra: Allocator) !Status {
     const result = try self.queryOids(ra, &.{
         ar.sys_cfg.admin_timeout,
         ar.sys_cfg.time_zone_utc_offset,
@@ -501,7 +501,7 @@ const WanStatus = struct {
     }
 };
 
-pub fn wanStatus(self: *Session, ra: *Allocator) !WanStatus {
+pub fn wanStatus(self: *Session, ra: Allocator) !WanStatus {
     const result = try self.queryOids(ra, &.{
         ar.wan_config.if_mac_addr,
         ar.wan_config.v6,
