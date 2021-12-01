@@ -111,13 +111,30 @@ fn parseHexString(comptime T: type, comptime length: usize, str: []const u8) ![l
     return arr;
 }
 
+fn parseDotString(comptime T: type, comptime length: usize, str: []const u8) ![length]T {
+    var arr: [length]T = undefined;
+    var it = std.mem.split(u8, str, ".");
+    var i: usize = 0;
+    while (it.next()) |part| {
+        if (i == length) {
+            return error.UnexpectedCharacter;
+        }
+        arr[i] = try std.fmt.parseInt(T, part, 10);
+        i += 1;
+    }
+
+    return arr;
+}
+
 pub const MacAddress = struct {
     addr: [6]u8,
 
+    pub fn init(addr: [6]u8) MacAddress {
+        return .{.addr = addr};
+    }
+
     pub fn parse(str: []const u8) !MacAddress {
-        return MacAddress{
-            .addr = try parseHexString(u8, 6, str),
-        };
+        return init(try parseHexString(u8, 6, str));
     }
 
     pub fn format(
@@ -138,15 +155,27 @@ pub const MacAddress = struct {
             self.addr[5],
         });
     }
+
+    pub fn eql(a: MacAddress, b: MacAddress) bool {
+        return std.mem.eql(u8, &a.addr, &b.addr);
+    }
 };
 
 pub const Ipv4Address = struct {
     addr: [4]u8,
 
+    pub const zero = init(.{0, 0, 0, 0});
+
+    pub fn init(addr: [4]u8) Ipv4Address {
+        return .{.addr = addr};
+    }
+
     pub fn parse(str: []const u8) !Ipv4Address {
-        return Ipv4Address{
-            .addr = try parseHexString(u8, 4, str),
-        };
+        return init(try parseHexString(u8, 4, str));
+    }
+
+    pub fn parseOid(str: []const u8) !Ipv4Address {
+        return init(try parseDotString(u8, 4, str));
     }
 
     pub fn format(
@@ -165,15 +194,31 @@ pub const Ipv4Address = struct {
             self.addr[3],
         });
     }
+
+    pub fn eql(a: Ipv4Address, b: Ipv4Address) bool {
+        return std.mem.eql(u8, &a.addr, &b.addr);
+    }
 };
 
 pub const Ipv6Address = struct {
     addr: [8]u16,
 
+    pub const zero = init(.{0, 0, 0, 0, 0, 0, 0, 0});
+
+    pub fn init(addr: [8]u16) Ipv6Address {
+        return .{.addr = addr};
+    }
+
     pub fn parse(str: []const u8) !Ipv6Address {
-        return Ipv6Address{
-            .addr = try parseHexString(u16, 8, str),
-        };
+        return init(try parseHexString(u16, 8, str));
+    }
+
+    pub fn parseOid(str: []const u8) !Ipv6Address {
+        var addr = @bitCast([8]u16, try parseDotString(u8, 16, str));
+        for (&addr) |*part| {
+            part.* = @byteSwap(u16, part.*);
+        }
+        return init(addr);
     }
 
     pub fn format(
@@ -199,5 +244,13 @@ pub const Ipv6Address = struct {
                 try writer.writeByte(':');
             }
         }
+    }
+
+    pub fn eql(a: Ipv6Address, b: Ipv6Address) bool {
+        return std.mem.eql(u16, &a.addr, &b.addr);
+    }
+
+    pub fn isLinkLocal(self: Ipv6Address) bool {
+        return self.addr[0] == 0xFE80;
     }
 };

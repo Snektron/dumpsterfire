@@ -23,7 +23,8 @@ const Options = struct {
         help,
         status,
         wan_status,
-        logout_current
+        logout_current,
+        list_lan_devices,
     };
 
     const name_to_command = std.ComptimeStringMap(Command, .{
@@ -31,6 +32,7 @@ const Options = struct {
         .{"status", .status},
         .{"wan-status", .wan_status},
         .{"logout-current", .logout_current},
+        .{"lan-devices", .list_lan_devices},
     });
 
     const default_username = "admin";
@@ -140,6 +142,8 @@ const Options = struct {
             \\status          Print generic modem status.
             \\wan-status      Print modem WAN status.
             \\logout-current  Log the current user out of the web interface.
+            \\lan-devices     List devices connected via LAN.
+            \\
             ,
             .{prog_name},
         );
@@ -171,11 +175,6 @@ pub fn main() !u8 {
 
     log_verbose = opts.verbose;
 
-    try run(allocator, opts);
-    return 0;
-}
-
-fn run(allocator: Allocator, opts: Options) !void {
     var session = try Session.init(allocator, opts.modem_address);
     defer session.close();
 
@@ -196,7 +195,7 @@ fn run(allocator: Allocator, opts: Options) !void {
         if (!opts.force and opts.command != .logout_current) {
             std.log.err("Another {s} user is currently already logged in.", .{ name });
             std.log.err("Rerun this command with -f to forcibly log them out.", .{});
-            return;
+            return 1;
         }
     }
 
@@ -214,7 +213,8 @@ fn run(allocator: Allocator, opts: Options) !void {
         }
     };
 
-    return maybe_err;
+    try maybe_err;
+    return 0;
 }
 
 fn runCommand(allocator: Allocator, opts: Options, session: *Session) !void {
@@ -232,5 +232,10 @@ fn runCommand(allocator: Allocator, opts: Options, session: *Session) !void {
             try wan_status.dump(stdout);
         },
         .logout_current => {},
+        .list_lan_devices => {
+            const devices = try session.devices(allocator);
+            defer devices.deinit(allocator);
+            try devices.dump(stdout);
+        },
     }
 }

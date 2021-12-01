@@ -13,6 +13,12 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = std.debug.assert;
 const epoch = std.time.epoch;
 
+const Date = oid.Date;
+const Duration = oid.Duration;
+const MacAddress = oid.MacAddress;
+const Ipv4Address = oid.Ipv4Address;
+const Ipv6Address = oid.Ipv6Address;
+
 const Session = @This();
 
 // TODO Uri-safe encoding where required.
@@ -271,7 +277,7 @@ pub const QueryResult = struct {
     }
 };
 
-pub fn queryOids(self: *Session, ra: Allocator, items: []const oid.Scalar) !QueryResult {
+pub fn query(self: *Session, ra: Allocator, items: []const oid.Scalar) !QueryResult {
     assert(items.len >= 1);
     try self.checkHasCredential();
     const response = try self.get("/snmpGet", .{
@@ -415,9 +421,9 @@ const Status = struct {
     serial_number: []u8,
     hardware_version: []u8,
     firmware_version: []u8,
-    current_time: oid.Date,
-    uptime: oid.Duration,
-    cable_mac: oid.MacAddress,
+    current_time: Date,
+    uptime: Duration,
+    cable_mac: MacAddress,
 
     pub fn deinit(self: Status, ra: Allocator) void {
         self.arena.promote(ra).deinit();
@@ -438,7 +444,7 @@ const Status = struct {
 };
 
 pub fn modemStatus(self: *Session, ra: Allocator) !Status {
-    const result = try self.queryOids(ra, &.{
+    const result = try self.query(ra, &.{
         ar.sys_cfg.admin_timeout,
         ar.sys_cfg.time_zone_utc_offset,
         ar.sys_cfg.language,
@@ -463,28 +469,28 @@ pub fn modemStatus(self: *Session, ra: Allocator) !Status {
         .serial_number = results[4],
         .hardware_version = results[5],
         .firmware_version = results[7],
-        .current_time = try oid.Date.parse(results[8]),
-        .uptime = try oid.Duration.parse(results[9]),
-        .cable_mac = try oid.MacAddress.parse(results[10]),
+        .current_time = try Date.parse(results[8]),
+        .uptime = try Duration.parse(results[9]),
+        .cable_mac = try MacAddress.parse(results[10]),
     };
 }
 
 const WanStatus = struct {
-    mac: oid.MacAddress,
+    mac: MacAddress,
     address_type: enum { v6, v4 },
     ipv4: struct {
-        address: oid.Ipv4Address,
+        address: Ipv4Address,
         prefix: u5,
-        default_gateway: oid.Ipv4Address,
-        lease_time: oid.Duration,
-        lease_expire: oid.Date,
+        default_gateway: Ipv4Address,
+        lease_time: Duration,
+        lease_expire: Date,
     },
     ipv6: struct {
-        address: oid.Ipv6Address,
+        address: Ipv6Address,
         prefix: u7,
-        default_gateway: oid.Ipv6Address,
-        lease_time: oid.Duration,
-        lease_expire: oid.Date,
+        default_gateway: Ipv6Address,
+        lease_time: Duration,
+        lease_expire: Date,
     },
 
     pub fn dump(self: WanStatus, writer: anytype) !void {
@@ -502,7 +508,7 @@ const WanStatus = struct {
 };
 
 pub fn wanStatus(self: *Session, ra: Allocator) !WanStatus {
-    const result = try self.queryOids(ra, &.{
+    const result = try self.query(ra, &.{
         ar.wan_config.if_mac_addr,
         ar.wan_config.v6,
 
@@ -522,21 +528,140 @@ pub fn wanStatus(self: *Session, ra: Allocator) !WanStatus {
     const results = result.results;
 
     return WanStatus{
-        .mac = try oid.MacAddress.parse(results[0]),
+        .mac = try MacAddress.parse(results[0]),
         .address_type = if (std.mem.eql(u8, results[1], "1")) .v6 else .v4,
         .ipv4 = .{
-            .address = try oid.Ipv4Address.parse(results[2]),
+            .address = try Ipv4Address.parse(results[2]),
             .prefix = try std.fmt.parseInt(u5, results[3], 10),
-            .default_gateway = try oid.Ipv4Address.parse(results[4]),
-            .lease_time = try oid.Duration.parse(results[5]),
-            .lease_expire = try oid.Date.parse(results[6]),
+            .default_gateway = try Ipv4Address.parse(results[4]),
+            .lease_time = try Duration.parse(results[5]),
+            .lease_expire = try Date.parse(results[6]),
         },
         .ipv6 = .{
-            .address = try oid.Ipv6Address.parse(results[7]),
+            .address = try Ipv6Address.parse(results[7]),
             .prefix = try std.fmt.parseInt(u7, results[8], 10),
-            .default_gateway = try oid.Ipv6Address.parse(results[9]),
-            .lease_time = try oid.Duration.parse(results[10]),
-            .lease_expire = try oid.Date.parse(results[11]),
+            .default_gateway = try Ipv6Address.parse(results[9]),
+            .lease_time = try Duration.parse(results[10]),
+            .lease_expire = try Date.parse(results[11]),
         },
+    };
+}
+
+const Device = struct {
+    host_name: []const u8,
+    // Note, might not include ALL the addresses a particular device has.
+    addr_v4: Ipv4Address,
+    addr_v6: Ipv6Address,
+    link_addr_v6: Ipv6Address,
+    mac: MacAddress,
+};
+
+const Devices = struct {
+    arena: ArenaAllocator.State,
+    devices: []Device,
+
+    pub fn deinit(self: Devices, ra: Allocator) void {
+        self.arena.promote(ra).deinit();
+    }
+
+    pub fn dump(self: Devices, writer: anytype) !void {
+        for (self.devices) |dev, i| {
+            try writer.print("device {}:\n", .{i});
+            try writer.print("  host name: {s}\n", .{dev.host_name});
+            try writer.print("  ipv4 address: {}\n", .{dev.addr_v4});
+            try writer.print("  ipv6 address: {}\n", .{dev.addr_v6});
+            try writer.print("  ipv6 link-local address: {}\n", .{dev.link_addr_v6});
+            try writer.print("  mac address: {}\n", .{dev.mac});
+        }
+    }
+};
+
+pub fn devices(self: *Session, ra: Allocator) !Devices {
+    const client = ar.lan_config.client_objects.lan_client_table.entry;
+    const result = try self.walk(ra, &.{
+        client.mac,
+        client.host_name,
+    });
+    errdefer result.deinit(ra);
+    const results = result.results;
+
+    // Note: This walk returns three lists concatenated: The field for the ipv4 address, the field for the ipv6 address,
+    // and the field for the link-local ipv6 address.
+    // The key for the ipv4 list starts with .200.1.4., the remainder is the ipv4 address in decimal separated by dots.
+    // The key for the ipv6 lists starts with .200.2.16., the remainder is the ipv6 address in decimal every u8 separated by dots.
+    // Note: The lists might not be of equal length!
+    // We will identify devices by mac address and by the key.
+    const ipv4_prefix = ".200.1.4.";
+    const ipv6_prefix = ".200.2.16.";
+
+    var key_to_dev = std.StringHashMap(usize).init(ra);
+    defer key_to_dev.deinit();
+    // Assume that all connected devices will have a mac address...
+    try key_to_dev.ensureUnusedCapacity(@intCast(u32, results[0].keys.len));
+
+    const arena = result.arena.promote(ra).allocator();
+
+    var devs = std.ArrayList(Device).init(arena);
+    errdefer devs.deinit();
+
+    for (results[0].keys) |key, i| {
+        const mac = try MacAddress.parse(results[0].values[i]);
+
+        // TODO: Maybe make another hash map? Probably not even worth it.
+        const index = for (devs.items) |dev, j| {
+            if (dev.mac.eql(mac)) {
+                break j;
+            }
+        } else blk: {
+            try devs.append(.{
+                .host_name = "",
+                .addr_v4 = Ipv4Address.zero,
+                .addr_v6 = Ipv6Address.zero,
+                .link_addr_v6 = Ipv6Address.zero,
+                .mac = mac,
+            });
+            break :blk devs.items.len - 1;
+        };
+
+        key_to_dev.putAssumeCapacityNoClobber(key, index);
+        const dev = &devs.items[index];
+
+        // We can already insert the address by extracting it from the key.
+        if (std.mem.startsWith(u8, key, ipv4_prefix)) {
+            const addr = try Ipv4Address.parseOid(key[ipv4_prefix.len..]);
+            if (dev.addr_v4.eql(Ipv4Address.zero)) {
+                dev.addr_v4 = addr;
+            }
+        } else if (std.mem.startsWith(u8, key, ipv6_prefix)) {
+            const addr = try Ipv6Address.parseOid(key[ipv6_prefix.len..]);
+            if (addr.isLinkLocal()) {
+                if (dev.link_addr_v6.eql(Ipv6Address.zero)) {
+                    dev.link_addr_v6 = addr;
+                }
+            } else if (dev.addr_v6.eql(Ipv6Address.zero)) {
+                dev.addr_v6 = addr;
+            }
+        } else {
+            log.debug("Invalid key {s}", .{key});
+            return error.UnexpectedResponse;
+        }
+    }
+
+    for (results[1].keys) |key, i| {
+        const host_name = results[1].values[i];
+        const index = key_to_dev.get(key) orelse {
+            log.debug("Walk returned hostname for device {s} which has no mac address", .{ key });
+            continue;
+        };
+        const dev = &devs.items[index];
+
+        if (dev.host_name.len == 0) {
+             dev.host_name = host_name;
+        }
+    }
+
+    return Devices{
+        .arena = result.arena,
+        .devices = devs.toOwnedSlice(),
     };
 }
